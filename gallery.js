@@ -10,7 +10,134 @@
 
 (function () {
     var UI,
-        GalleryItem;
+        GalleryItem,
+        Music;
+
+    Music = function (playlist, args) {
+        var music = {
+            args: {},
+            index: undefined, // position in the playlist
+            playing: false,
+            // TODO: work with tags too
+            playlist: [], // e.g. {src: ..., title: ..., tags: []}
+            song: undefined
+        };
+
+        music.init = function (playlist, args) {
+            music.args = UI.getArgs({
+                'playEl': undefined,
+                'nextEl': undefined,
+                'prevEl': undefined,
+                'progressEl': undefined,
+                'titleEl': undefined,
+                'onSongChange': undefined
+            }, args);
+            if (!music.args.playEl) {
+                throw new Error('A play element at minimum is required.');
+            }
+            music.playlist = playlist;
+            music.index = 0;
+            music.args.playEl.addEventListener('click', music.togglePlay);
+            if (music.args.prevEl) {
+                music.args.prevEl.innerHTML = '&laquo;';
+                music.args.prevEl.addEventListener('click', music.prev);
+            }
+            if (music.args.nextEl) {
+                music.args.nextEl.innerHTML = '&raquo;';
+                music.args.nextEl.addEventListener('click', music.next);
+            }
+            if (music.args.progressEl) {
+                music.args.progressEl.innerHTML = '<div class="song-progress-bar"></div>';
+            }
+            music.updateEls();
+        };
+
+        music.updateEls = function() {
+            var progress;
+            music.args.playEl.innerHTML = (
+                music.playing ? '&parallel;' : '&vrtri;'
+            );
+            if (music.args.titleEl) {
+                music.args.titleEl.innerText = music.playlist[music.index].title;
+            }
+            if (music.args.progressEl) {
+                if (music.song) {
+                    progress = (music.song.currentTime / music.song.duration) * 100;
+                } else {
+                    progress = 0;
+                }
+                music.args.progressEl.querySelector('.song-progress-bar')
+                    .style.width = String(progress) + '%';
+            }
+        };
+
+        music.play = function(newSong) {
+            if (music.song && !newSong) {
+                music.song.pause();
+            } else {
+                if (music.song) {
+                    music.song.pause();
+                    delete(music.song);
+                }
+                music.song = new Audio(music.playlist[music.index].src);
+            }
+            music.song.addEventListener('ended', function () {
+                music.next();
+            });
+            music.song.addEventListener('timeupdate', function () {
+                music.updateEls();
+            });
+            music.song.play();
+            music.playing = true;
+            music.updateEls();
+        };
+
+        music.togglePlay = function () {
+            if (music.playing) {
+                music.pause();
+            } else {
+                music.play();
+            }
+        };
+
+        music.pause = function () {
+            if (!music.playing) {
+                return;
+            }
+            music.song.pause();
+            music.playing = false;
+            music.updateEls();
+        };
+
+        music.next = function () {
+            if (music.index >= music.playlist.length - 1) {
+                music.index = 0;
+            } else {
+                music.index += 1;
+            }
+            if (music.playing) {
+                music.play(true);
+            } else {
+                music.updateEls();
+            }
+        };
+
+        music.prev = function () {
+            if (music.index == 0) {
+                music.index = music.playlist.length - 1;
+            } else {
+                music.index -= 1;
+            }
+            if (music.playing) {
+                music.play(true);
+            } else {
+                music.updateEls();
+            }
+        };
+
+        music.init(playlist, args);
+        return music;
+    };
 
     GalleryItem = function (section, index) {
         var item = UI.galleries[section][index];
@@ -41,6 +168,7 @@
         touchXy: [], // coords for last touch start
         touchActive: false,
         numThumbnails: 10,
+        music: undefined, // Music object
         $els: {}, // managed by $cache
         galleries: {}, // section > [urls]
         // which part of the gallery is currently active?
@@ -254,6 +382,9 @@
             UI.hideControls();
             UI.autoplayLastTick = (new Date).getTime();
             UI.playTick(true);
+            if (UI.music) {
+                UI.music.play();
+            }
             // ensure we show at the right size after the footer is hidden
             setTimeout(UI.FormatImgs, 300);
         },
@@ -265,6 +396,9 @@
             UI.$els.footer.style.display = 'block';
             UI.showControls();
             UI.autoplayLastTick = null;
+            if (UI.music) {
+                UI.music.pause();
+            }
             setTimeout(UI.FormatImgs, 300);
         },
 
@@ -707,42 +841,6 @@
             ].join('&');
         },
 
-        init: function () {
-            // fetch images.json and generate gallery information
-            var section;
-            var xhr = new XMLHttpRequest();
-            UI.initEls();
-            UI.initBehaviors();
-            xhr.open('GET', './images.json', true);
-            xhr.onload = function () {
-                var images, i, item, navPath;
-                if (this.status >= 200 && this.status < 300) {
-                    UI.galleries = {};
-                    UI.sections = [];
-                    images = JSON.parse(this.response).images;
-                    for (i = 0; i < images.length; i++) {
-                        navPath = images[i].name.split('/');
-                        section = navPath.slice(0, -1).join('/');
-                        if (!UI.galleries.hasOwnProperty(section)) {
-                            UI.galleries[section] = [];
-                        }
-                        UI.galleries[section].push(images[i]);
-                        if (UI.sections.indexOf(section) == -1) {
-                            UI.sections.push(section);
-                        }
-                    }
-                    UI.sections.sort();
-                    UI.onInit();
-                } else {
-                    UI.error();
-                }
-            }
-            xhr.onerror = function () {
-                UI.error();
-            }
-            xhr.send();
-        },
-
         // cache UI parts
         initEls: function () {
             UI.$cache('#content', 'content', {single: true});
@@ -755,6 +853,7 @@
             UI.$cache('#thumbnails', 'thumbnails', {single: true});
             UI.$cache('#thumbnails .browser', 'thumbnailsBrowser', {single: true});
             UI.$cache('#thumbnails .controls', 'thumbnailsControls', {single: true});
+            UI.$cache('#music', 'music', {single: true});
             UI.$cache('#footer', 'footer', {single: true});
             UI.$cache('#footer .images', 'footerNav', {single: true});
             UI.$cache('#content .nav-next', 'nextImage', {single: true});
@@ -851,11 +950,83 @@
             });
         },
 
+        initComponents: function () {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'music.json', true);
+            xhr.onload = function () {
+                var playlist;
+                // 404 = no music, no biggy
+                if (this.status >= 200 && this.status < 300) {
+                    playlist = [];
+                    JSON.parse(this.response).music.forEach(function (song) {
+                        var srcParts = song.src.split('/'),
+                            titleParts = srcParts[srcParts.length - 1].split('.'),
+                            title = titleParts.slice(0, titleParts.length - 1).join('.');
+                        playlist.push({
+                            src: song.src,
+                            title: title,
+                            tags: song.tags,
+                        });
+                    });
+                    UI.music = Music(playlist, {
+                        playEl: UI.$1('.song-play', UI.$els.music),
+                        nextEl: UI.$1('.song-next', UI.$els.music),
+                        prevEl: UI.$1('.song-prev', UI.$els.music),
+                        titleEl: UI.$1('.song-title', UI.$els.music),
+                        progressEl: UI.$1('.song-progress', UI.$els.music)
+                    });
+                } else {
+                    UI.$els.music.style.display = 'none';
+                }
+            };
+            xhr.onerror = function () {
+                UI.$els.music.style.display = 'none';
+            };
+            xhr.send();
+        },
+
         onInit: function () {
             // and get it rollin'!
             UI.onHashchange();
             // load this last so we know which section is selected
             UI.renderGalleryList();
+        },
+
+        init: function () {
+            // fetch images.json and generate gallery information
+            var section;
+            var xhr = new XMLHttpRequest();
+            UI.initEls();
+            UI.initComponents();
+            UI.initBehaviors();
+            xhr.open('GET', 'images.json', true);
+            xhr.onload = function () {
+                var images, i, item, navPath;
+                if (this.status >= 200 && this.status < 300) {
+                    UI.galleries = {};
+                    UI.sections = [];
+                    images = JSON.parse(this.response).images;
+                    for (i = 0; i < images.length; i++) {
+                        navPath = images[i].name.split('/');
+                        section = navPath.slice(0, -1).join('/');
+                        if (!UI.galleries.hasOwnProperty(section)) {
+                            UI.galleries[section] = [];
+                        }
+                        UI.galleries[section].push(images[i]);
+                        if (UI.sections.indexOf(section) == -1) {
+                            UI.sections.push(section);
+                        }
+                    }
+                    UI.sections.sort();
+                    UI.onInit();
+                } else {
+                    UI.error();
+                }
+            }
+            xhr.onerror = function () {
+                UI.error();
+            }
+            xhr.send();
         }
     };
 

@@ -287,6 +287,51 @@ body {
 }
 
 
+#music {
+    background-color: #000;
+    color: #fff;
+    padding: 0px;
+    display: flex;
+    flex-direction: row;
+    height: 48px;
+}
+#music .song-ctrl {
+    padding: 10px;
+    user-select: none;
+    width: 12px;
+    text-align: center;
+    margin: 5px;
+    cursor: pointer;
+    background-color: #222;
+    border-radius: 3px;
+    flex-grow: 0;
+}
+#music .song-ctrl:hover {
+    background-color: #444;
+    transition: all 0.4s;
+}
+#music .song-title {
+    padding: 15px;
+    flex-grow: 0;
+    max-width: 40%;
+    overflow: hidden;
+    white-space: nowrap;
+}
+#music .song-progress {
+    flex-grow: 1;
+    margin: 15px;
+    border: 1px solid #333;
+    border-radius: 5px;
+    background-color: #111;
+}
+#music .song-progress .song-progress-bar {
+    height: 100%;
+    width: 0%;
+    background-color: #00213e;
+    background: linear-gradient(45deg, #00213e, #1b5d96);
+    border-radius: 4px;
+}
+
 #footer {
     height: 100px;
     text-align: center;
