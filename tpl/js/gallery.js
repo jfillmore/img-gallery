@@ -1,28 +1,154 @@
 'use strict';
-
-/* TODO:
-
-- swipe down on thumbnails = close
-- storage for comments
-- loaded class for thumbnails/footer
-
-*/
-
 (function () {
     var UI,
-        GalleryItem;
+        GalleryItem,
+        Music;
+
+    Music = function (playlist, args) {
+        var music = {
+            args: {},
+            index: undefined, // position in the playlist
+            playing: false,
+            // TODO: work with tags too
+            playlist: [], // e.g. {src: ..., title: ..., tags: []}
+            song: undefined
+        };
+
+        music.init = function (playlist, args) {
+            music.args = UI.getArgs({
+                'playEl': undefined,
+                'nextEl': undefined,
+                'prevEl': undefined,
+                'progressEl': undefined,
+                'titleEl': undefined,
+                'onSongChange': undefined
+            }, args);
+            if (!music.args.playEl) {
+                throw new Error('A play element at minimum is required.');
+            }
+            music.playlist = playlist;
+            music.index = 0;
+            music.args.playEl.addEventListener('click', music.togglePlay);
+            if (music.args.prevEl) {
+                music.args.prevEl.innerHTML = '&laquo;';
+                music.args.prevEl.addEventListener('click', music.prev);
+            }
+            if (music.args.nextEl) {
+                music.args.nextEl.innerHTML = '&raquo;';
+                music.args.nextEl.addEventListener('click', music.next);
+            }
+            if (music.args.progressEl) {
+                music.args.progressEl.innerHTML = '<div class="song-progress-bar"></div>';
+            }
+            music.updateEls();
+        };
+
+        music.updateEls = function() {
+            var progress;
+            music.args.playEl.innerHTML = (
+                music.playing ? '&#10073;&#10073;' : '&#10148;'
+            );
+            music.args.playEl.classList.toggle('song-playing', music.playing);
+            if (music.args.titleEl) {
+                music.args.titleEl.innerText = music.playlist[music.index].title;
+            }
+            if (music.args.progressEl) {
+                if (music.song) {
+                    progress = (music.song.currentTime / music.song.duration) * 100;
+                } else {
+                    progress = 0;
+                }
+                music.args.progressEl.querySelector('.song-progress-bar')
+                    .style.width = String(progress) + '%';
+            }
+        };
+
+        music.loadSong = function() {
+            if (music.song) {
+                music.song.pause();
+                delete(music.song);
+                // update ourselves real quick so progress resets to 0 and the
+                // new title is loaded
+                music.updateEls();
+            } else {
+                // update so we have the new song title
+                music.updateEls();
+            }
+            music.song = new Audio(music.playlist[music.index].src);
+            music.song.addEventListener('ended', function () {
+                music.next();
+            });
+            music.song.addEventListener('timeupdate', function () {
+                music.updateEls();
+            });
+            // if we were playing before... continue so!
+            if (music.playing) {
+                music.play();
+            }
+        };
+
+        music.togglePlay = function () {
+            if (music.playing) {
+                music.pause();
+            } else {
+                music.play();
+            }
+        };
+
+        music.play = function() {
+            if (music.song) {
+                music.song.pause();
+            } else {
+                music.loadSong();
+            }
+            music.song.play();
+            music.playing = true;
+            music.updateEls();
+        };
+
+        music.pause = function () {
+            if (!music.playing) {
+                return;
+            }
+            music.song.pause();
+            music.playing = false;
+            music.updateEls();
+        };
+
+        music.next = function () {
+            if (music.index >= music.playlist.length - 1) {
+                music.index = 0;
+            } else {
+                music.index += 1;
+            }
+            music.loadSong();
+        };
+
+        music.prev = function () {
+            if (music.index == 0) {
+                music.index = music.playlist.length - 1;
+            } else {
+                music.index -= 1;
+            }
+            music.loadSong();
+        };
+
+        music.init(playlist, args);
+        return music;
+    };
 
     GalleryItem = function (section, index) {
-        var item = UI.gallery[section][index];
+        var item = UI.galleries[section][index];
         return {
             section: section,
+            original: item.original,
             files: item.files,
             name: item.name,
             index: index,
-            get_image: function (imgType) {
+            getImage: function (imgType) {
                 var i;
                 for (i = 0; i < item.files.length; i++) {
-                    if (item.files[i].size_name == imgType) {
+                    if (item.files[i].sizeName == imgType) {
                         return item.files[i];
                     }
                 }
@@ -36,27 +162,32 @@
     UI = {
         // main vars
         autoplay: false,
-        autoplay_timer: 6000,
-        autoplay_last_tick: null, // ensures repeated off/off ignores old ticks
-        touch_xy: [], // coords for last touch start
-        num_thumbnails: 10,
+        autoplayTimer: 6000,
+        autoplayLastTick: null, // ensures repeated off/off ignores old ticks
+        touchXy: [], // coords for last touch start
+        touchActive: false,
+        numThumbnails: 10,
+        music: undefined, // Music object
         $els: {}, // managed by $cache
-        gallery: {}, // section > [urls]
+        galleries: {}, // section > [urls]
         // which part of the gallery is currently active?
         section: undefined,
+        // an alpha-ordered list of sections to make gallery changes easier
+        sections: [],
         // where in the gallery are we currently viewing?
         index: 0,
-        // while browsing the thumbnails, what is our current position?
-        index_thumbnails: 0,
+        // while browsing the thumbnails, what is our current position/gallery?
+        indexThumbnails: 0,
+        sectionThumbnails: undefined,
 
         // merge two (or more) objects together without modifying any parameters
-        merge_objs: function () {
-            var merged = {}, i, name, addon_obj;
+        mergeObjs: function () {
+            var merged = {}, i, name, addonObj;
             for (i = 0; i < arguments.length && arguments[i]; i++) {
-                addon_obj = arguments[i];
-                for (name in addon_obj) {
-                    if (addon_obj.hasOwnProperty(name)) {
-                        merged[name] = addon_obj[name];
+                addonObj = arguments[i];
+                for (name in addonObj) {
+                    if (addonObj.hasOwnProperty(name)) {
+                        merged[name] = addonObj[name];
                     }
                 }
             }
@@ -64,27 +195,27 @@
         },
 
         // get arguments based on a set of defaults, optionally allowing extra args in
-        get_args: function (base_args, args, merge) {
+        getArgs: function (baseArgs, args, merge) {
             var arg,
-                final_args = UI.merge_objs({}, base_args);
+                finalArgs = UI.mergeObjs({}, baseArgs);
             for (arg in args) {
                 if (args.hasOwnProperty(arg) && args[arg] !== undefined) {
-                    if (arg in base_args || merge) {
-                        final_args[arg] = args[arg];
+                    if (arg in baseArgs || merge) {
+                        finalArgs[arg] = args[arg];
                     }
                 }
             }
-            return final_args;
+            return finalArgs;
         },
 
         $cache: function (query, name, args) {
             var els = UI.$(query);
-            args = UI.get_args({
+            args = UI.getArgs({
                 single: false,
-                map_by: undefined // function to extract element string value
+                mapBy: undefined // function to extract element string value
             }, args);
-            if (args.single && args.map_by) {
-                throw new Error("Cannot use 'single' and 'map_by' together; options conflict");
+            if (args.single && args.mapBy) {
+                throw new Error("Cannot use 'single' and 'mapBy' together; options conflict");
             }
             if (els.length < 1) {
                 throw new Error("Failed to find at least one element matching '" + query + "'");
@@ -93,13 +224,13 @@
                 UI.$els[name] = els[0];
             } else {
                 // if fetching multiple objects we can either generate an object or array
-                if (args.map_by) {
+                if (args.mapBy) {
                     if (!UI.$els.hasOwnProperty(name)) {
                         UI.$els[name] = {};
                     }
                     els.forEach(function (el) {
-                        var mapped_name = args.map_by(el, name, els);
-                        UI.$els[name][mapped_name] = el;
+                        var mappedName = args.mapBy(el, name, els);
+                        UI.$els[name][mappedName] = el;
                     });
                 } else {
                     UI.$els[name] = els;
@@ -125,10 +256,10 @@
         },
 
         // get a bunch of items, before and after the section/index given and scrolling into other galleries if needed
-        get_gallery_items: function (section, index, count, left_count) {
-            var gallery_items = [],
-                gallery = UI.gallery[section],
-                gallery_item,
+        getGalleryItems: function (section, index, count, leftCount) {
+            var galleryItems = [],
+                gallery = UI.galleries[section],
+                galleryItem,
                 pos,
                 i;
             // we start with the current gallery given and get a slice of
@@ -141,70 +272,71 @@
             } else {
                 index = index % gallery.length;
             }
-            gallery_items.push(GalleryItem(section, index)); // we'll keep the current index in the middle of previous vs next
+            galleryItems.push(GalleryItem(section, index)); // we'll keep the current index in the middle of previous vs next
             // now figure out the before/after items
             for (i = 1; i <= count; i++) {
                 // prev
-                if (!left_count || left_count && i <= left_count) {
+                if (!leftCount || leftCount && i <= leftCount) {
                     pos = index - i;
                     if (pos >= 0) {
-                        gallery_items.unshift(GalleryItem(section, pos));
+                        galleryItems.unshift(GalleryItem(section, pos));
                     } else {
                         // look in previous galleries
-                        gallery_item = UI.scroll_gallery(
+                        galleryItem = UI.scrollGallery(
                             section,
-                            UI.prev_section(),
+                            UI.prevSection(section),
                             pos, // e.g. -1, -10
                             true
                         );
-                        if (gallery_item) {
-                            gallery_items.unshift(gallery_item);
+                        if (galleryItem) {
+                            galleryItems.unshift(galleryItem);
                         }
                     }
                 }
                 // next
                 pos = index + i;
                 if (pos < gallery.length) {
-                    gallery_items.push(GalleryItem(section, pos));
+                    galleryItems.push(GalleryItem(section, pos));
                 } else {
                     // look in the upcoming galleries
-                    gallery_item = UI.scroll_gallery(
+                    galleryItem = UI.scrollGallery(
                         section,
-                        UI.next_section(),
+                        UI.nextSection(section),
                         pos - gallery.length, // e.g. 0, 20
+                        false
                     );
-                    if (gallery_item) {
-                        gallery_items.push(gallery_item);
+                    if (galleryItem) {
+                        galleryItems.push(galleryItem);
                     }
                 }
             }
-            return gallery_items;
+            return galleryItems;
         },
 
-        // attempts to get a gallery item from a prev/next section, scrolling through multiple if needed but stopping if we reach our current gallery
-        scroll_gallery: function (start_section, section, index, scroll_back) {
+        // attempts to get a gallery item from a prev/next section, scrolling through multiple if needed but stopping if we reach our current gallery (unless infinite=true)
+        scrollGallery: function (startSection, section, index, scrollBack, infinite) {
             var gallery;
-            if (index < 0 && !scroll_back) {
+            if (index < 0 && !scrollBack) {
                 throw new Error("Overflow index must be positive to go forward.");
-            } else if (index > 0 && scroll_back) {
+            } else if (index > 0 && scrollBack) {
                 throw new Error("Overflow index must be negative to go back.");
             }
             // we never want to return back to the start
-            while (section != start_section) {
+            while (section != startSection || infinite) {
                 // we MAY not find the image in this gallery...
-                gallery = UI.gallery[section];
-                if (scroll_back) {
+                gallery = UI.galleries[section];
+                if (scrollBack) {
                     // e.g. -2 and gallery.length = 10 (found it!)
                     //  or: -5 and gallery.length = 3 (keep going)
                     index = gallery.length + index;
                 }
                 // see if we need to keep iterating or not
                 if (index < 0) {
-                    section = UI.prev_section();
+                    section = UI.prevSection(section);
                 } else if (index >= gallery.length) {
                     // e.g. 2 and gallery.length = 10 (found it!)
                     //  or: 5 and gallery.length = 3 (keep going)
-                    section = UI.next_section();
+                    section = UI.nextSection(section);
                     index -= gallery.length;
                 } else {
                     return GalleryItem(section, index);
@@ -212,12 +344,12 @@
             }
         },
 
-        init_img_behaviors: function () {
-            var cur_img = UI.$1('img[data-item-pos="current"]', UI.$els.gallery);
-            cur_img.addEventListener('click', UI.next_img);
-            UI.$('img', UI.$els.footer_nav).forEach(function (img) {
+        initImgBehaviors: function () {
+            var curImg = UI.$1('img[data-item-pos="current"]', UI.$els.gallery);
+            curImg.addEventListener('click', UI.nextImg);
+            UI.$('img', UI.$els.footerNav).forEach(function (img) {
                 img.addEventListener('click', function () {
-                    UI.nav_to(
+                    UI.navTo(
                         this.getAttribute('data-gallery'),
                         parseInt(this.getAttribute('data-index'), 10)
                     );
@@ -225,10 +357,10 @@
             });
         },
 
-        init_thumbnail_behaviors: function () {
-            UI.$('img', UI.$els.thumbnails_browser).forEach(function (img) {
+        initThumbnailBehaviors: function () {
+            UI.$('img', UI.$els.thumbnailsBrowser).forEach(function (img) {
                 img.addEventListener('click', function () {
-                    UI.nav_to(
+                    UI.navTo(
                         this.getAttribute('data-gallery'),
                         parseInt(this.getAttribute('data-index'), 10)
                     );
@@ -241,89 +373,111 @@
             // TODO
         },
 
-        autoplay_start: function () {
+        autoplayStart: function () {
             UI.autoplay = true;
-            UI.$els.autoplay_start.style.display = 'none';
-            UI.$els.autoplay_stop.style.display = 'block';
+            UI.$els.autoplayStart.style.display = 'none';
+            UI.$els.autoplayStop.style.display = 'block';
             UI.$els.footer.style.display = 'none';
-            UI.hide_controls();
-            UI.autoplay_last_tick = (new Date).getTime();
-            UI._play_tick(true);
+            UI.hideControls();
+            UI.autoplayLastTick = (new Date).getTime();
+            UI.playTick(true);
+            if (UI.music) {
+                UI.music.play();
+            }
             // ensure we show at the right size after the footer is hidden
-            setTimeout(UI._format_imgs, 300);
+            setTimeout(UI.formatImgs, 300);
         },
 
-        autoplay_stop: function () {
+        autoplayStop: function () {
             UI.autoplay = false;
-            UI.$els.autoplay_start.style.display = 'block';
-            UI.$els.autoplay_stop.style.display = 'none';
+            UI.$els.autoplayStart.style.display = 'block';
+            UI.$els.autoplayStop.style.display = 'none';
             UI.$els.footer.style.display = 'block';
-            UI.show_controls();
-            UI.autoplay_last_tick = null;
-            setTimeout(UI._format_imgs, 300);
-        },
-
-        _play_tick_counter: function (now_ms) {
-            if (!now_ms) {
-                now_ms = (new Date).getTime();
+            UI.showControls();
+            UI.autoplayLastTick = null;
+            if (UI.music) {
+                UI.music.pause();
             }
+            setTimeout(UI.formatImgs, 300);
         },
 
-        _play_tick: function (starting) {
-            var now_ms = (new Date).getTime(),
-                left = (UI.autoplay_timer - (now_ms - UI.autoplay_last_tick)) / 1000;
+        playTick: function (starting) {
+            var nowMs = (new Date).getTime(),
+                left = (UI.autoplayTimer - (nowMs - UI.autoplayLastTick)) / 1000;
             if (UI.autoplay) {
-                UI.$els.autoplay_ctr.innerHTML = '[' 
+                UI.$els.autoplayCtr.innerHTML = '[' 
                     + parseInt(left + (starting ? 0 : 1) , 10) + ']';
-                if (now_ms >= (UI.autoplay_last_tick + UI.autoplay_timer)) {
-                    UI.next_img();
-                    UI.autoplay_last_tick = now_ms;
+                if (nowMs >= (UI.autoplayLastTick + UI.autoplayTimer)) {
+                    UI.nextImg();
+                    UI.autoplayLastTick = nowMs;
                 }
-                setTimeout(UI._play_tick, 1000);
+                setTimeout(UI.playTick, 1000);
             }
         },
 
-        _touch_start: function (ev) {
-            UI.touch_xy = [
+        slideUp: function() {
+            if (UI.$els.galleries.classList.contains('hidden')) {
+                UI.showThumbnails();
+            } else {
+                UI.hideGalleries();
+            }
+        },
+
+        slideDown: function() {
+            if (UI.$els.thumbnails.classList.contains('hidden')) {
+                UI.showGalleries();
+            } else {
+                UI.hidePopups();
+            }
+        },
+
+        touchStart: function (ev) {
+            UI.touchActive = true;
+            UI.touchXy = [
                 ev.touches[0].clientX,
                 ev.touches[0].clientY,
             ];
+            ev.preventDefault();
+            ev.stopPropagation();
         },
 
-        _touch_move: function (ev) {
+        touchMove: function (ev) {
             var dx, dy, threshold = 66;
-            if (!UI.touch_xy.length) {
+            // once we've processed a touch we stop processing
+            // otherwise we get too many behaviors at once
+            if (!UI.touchXy.length || !UI.touchActive) {
                 return;
             }
-            dx = UI.touch_xy[0] - ev.touches[0].clientX;
-            dy = UI.touch_xy[1] - ev.touches[0].clientY;
+            dx = UI.touchXy[0] - ev.touches[0].clientX;
+            dy = UI.touchXy[1] - ev.touches[0].clientY;
             if (Math.abs(dx) > Math.abs(dy)) {
                 if (Math.abs(dx) > threshold) {
-                    UI._touch_go(dx);
+                    UI.touchGo(dx);
+                    UI.touchActive = false;
                 }
             } else {
                 if (dy > threshold) {
-                    UI.show_thumbnails();
-                } else {
+                    UI.slideUp();
+                    UI.touchActive = false;
+                } else if (dy < -threshold) {
+                    UI.slideDown();
+                    UI.touchActive = false;
                 }
+            }
+            ev.preventDefault();
+            ev.stopPropagation();
+        },
+
+        touchGo: function (delta) {
+            UI.touchXy = [];
+            if (delta > 0) {
+                UI.nextImg();
+            } else {
+                UI.prevImg();
             }
         },
 
-        _touch_go: function (delta) {
-            var go = function () {
-                if (delta > 0) {
-                    UI.next_img();
-                } else {
-                    UI.prev_img();
-                }
-            };
-            UI.touch_xy = [];
-            UI.$1('img[data-item-pos="current"]', UI.$els.gallery)
-                .classList.add('swiped-' + (delta < 0 ? 'left' : 'right'));
-            setTimeout(go, 600);
-        },
-
-        on_hashchange: function () {
+        onHashchange: function () {
             var hash = window.location.hash,
                 index = UI.index,
                 section = UI.section;
@@ -341,238 +495,250 @@
             }
             // always nav if on 0 (e.g. first page load)
             if (index !== UI.index || !index) {
-                UI.nav_to(section, index);
+                UI.navTo(section, index);
             };
         },
 
         // load up a particular section of the gallery
-        nav_to: function (section, index) {
+        navTo: function (section, index) {
             var part;
             // default to the first part of the gallery
-            if (!section) {
-                for (part in UI.gallery) {
-                    if (UI.gallery.hasOwnProperty(part)) {
-                        section = part;
-                        break
-                    }
-                }
+            section = section || UI.sections[0];
+            if (!UI.galleries.hasOwnProperty(section)) {
+                UI.navTo();
+                return;
             }
             UI.section = section;
-            UI.load_imgs(index === undefined ? 0 : index);
+            UI.loadImgs(index === undefined ? 0 : index);
         },
 
-        hide_controls: function () {
-            UI.$('.nav-control', UI.$els.content).forEach(function (el) {
+        hideControls: function () {
+            UI.$('.nav-ctrl', UI.$els.content).forEach(function (el) {
                 el.classList.add('hidden');
             });
+            UI.$els.info.classList.add('hidden');
         },
 
-        show_controls: function () {
-            UI.$('.nav-control', UI.$els.content).forEach(function (el) {
+        showControls: function () {
+            UI.$('.nav-ctrl', UI.$els.content).forEach(function (el) {
                 el.classList.remove('hidden');
             });
         },
 
-        show_sections: function () {
-            UI.hide_controls();
-            UI.$els.sections.classList.remove('hidden');
-        },
-
-        hide_sections: function () {
-            if (!UI.autoplay) {
-                UI.show_controls();
+        showGalleries: function () {
+            if (UI.autoplay) {
+                return;
             }
-            UI.$els.sections.classList.add('hidden');
+            UI.hideControls();
+            UI.$els.galleries.classList.remove('hidden');
         },
 
-        show_thumbnails: function () {
-            UI.hide_controls();
+        hideGalleries: function () {
+            if (!UI.autoplay) {
+                UI.showControls();
+            }
+            UI.$els.galleries.classList.add('hidden');
+        },
+
+        showThumbnails: function () {
+            if (UI.autoplay) {
+                return;
+            }
+            UI.hideControls();
             UI.$els.thumbnails.classList.remove('hidden');
         },
 
-        hide_thumbnails: function () {
+        hidePopups: function () {
             if (!UI.autoplay) {
-                UI.show_controls();
+                UI.showControls();
             }
             UI.$els.thumbnails.classList.add('hidden');
+            UI.$els.info.classList.add('hidden');
+            // reset our position to whats selected
+            UI.loadThumbnailImgs(UI.section, UI.index);
         },
 
-        render_images: function (gallery_items, size) {
+        renderImages: function (galleryItems, size) {
             var html = [],
-                seen_current_item = false,
-                seen_current_gallery = false;
+                seenCurrentItem = false,
+                seenCurrentGallery = false;
             size = size || GalleryItem.IMAGE_TINY;
-            gallery_items.forEach(function (gallery_item) {
-                var item_position,
-                    gallery_position,
-                    is_current_gallery = (
-                        UI.section == gallery_item.section 
+            galleryItems.forEach(function (galleryItem) {
+                var itemPosition,
+                    galleryPosition,
+                    isCurrentGallery = (
+                        UI.section == galleryItem.section 
                     ),
-                    is_current_item = (
-                        gallery_item.index === UI.index
-                        && is_current_gallery
+                    isCurrentItem = (
+                        galleryItem.index === UI.index
+                        && isCurrentGallery
                     );
-                if (is_current_gallery) {
-                    seen_current_gallery = true;
-                    gallery_position = 'current';
+                if (isCurrentGallery) {
+                    seenCurrentGallery = true;
+                    galleryPosition = 'current';
                 } else {
-                    gallery_position = seen_current_gallery ? 'next' : 'prev';
+                    galleryPosition = seenCurrentGallery ? 'next' : 'prev';
                 }
-                if (is_current_item) {
-                    seen_current_item = true;
-                    item_position = 'current';
+                if (isCurrentItem) {
+                    seenCurrentItem = true;
+                    itemPosition = 'current';
                 } else {
-                    item_position = seen_current_item ? 'next' : 'prev';
+                    itemPosition = seenCurrentItem ? 'next' : 'prev';
                 }
                 html.push(
-                    '<img src="' + gallery_item.get_image(size).src + '"'
-                    + ' data-index="' + gallery_item.index + '"'
-                    + ' data-gallery="' + gallery_item.section + '"'
-                    + ' data-gallery-pos="' + gallery_position + '"'
-                    + ' data-item-pos="' + item_position + '"'
+                    '<img src="' + galleryItem.getImage(size).src + '"'
+                    + ' data-index="' + galleryItem.index + '"'
+                    + ' data-gallery="' + galleryItem.section + '"'
+                    + ' data-gallery-pos="' + galleryPosition + '"'
+                    + ' data-item-pos="' + itemPosition + '"'
                     + '>'
                 );
             });
             return html.join('\n');
         },
 
-        load_footer_imgs: function (index) {
-            UI.$els.footer_nav.innerHTML = UI.render_images(
-                UI.get_gallery_items(UI.section, index, 9, 2)
+        loadFooterImgs: function (index) {
+            UI.$els.footerNav.innerHTML = UI.renderImages(
+                UI.getGalleryItems(UI.section, index, 9, 1)
             );
         },
 
-        // load thumbnails for the current section; shows `UI.num_thumbnails` before and after the index given
-        load_thumbnail_imgs: function (index) {
-            UI.$els.thumbnails_browser.innerHTML = UI.render_images(
-                UI.get_gallery_items(UI.section, index, UI.num_thumbnails)
+        // load thumbnails for the current section; shows `UI.numThumbnails` before and after the index given
+        loadThumbnailImgs: function (section, index) {
+            UI.$els.thumbnailsBrowser.innerHTML = UI.renderImages(
+                UI.getGalleryItems(section, index, UI.numThumbnails)
             );
-            UI.index_thumbnails = index;
-            UI.init_thumbnail_behaviors();
+            UI.sectionThumbnails = section;
+            UI.indexThumbnails = index;
+            UI.initThumbnailBehaviors();
         },
 
         // load all sections from the gallery
-        load_sections: function () {
-            var html,
-                section;
-            html = ['<ol>'];
-            for (section in UI.gallery) {
-                if (UI.gallery.hasOwnProperty(section)) {
-                    html.push(
-                        '<li class="'
-                        + (UI.section == section ? 'active' : '')
-                        + '">' + section
-                        + '</li>'
-                    );
-                }
-            }
-            html.push('</ol>');
-            UI.$1('.browser', UI.$els.sections).innerHTML = html.join('\n');
-            UI.$('li', UI.$els.sections).forEach(function (el) {
+        renderGalleryList: function () {
+            var html;
+            html = ['<div class="galleryList">'];
+            UI.sections.forEach(function(section, i) {
+                html.push(
+                    '<div class="gallery-item'
+                    + (UI.section == section ? ' active' : '')
+                    + '">' + section
+                    + '</div>'
+                );
+            });
+            html.push('</div>');
+            UI.$1('.browser', UI.$els.galleries).innerHTML = html.join('\n');
+            UI.$('.gallery-item', UI.$els.galleries).forEach(function (el) {
                 el.addEventListener('click', function (ev) {
-                    UI.nav_to(ev.target.textContent, 0);
-                    UI.hide_sections();
+                    UI.navTo(ev.target.textContent, 0);
+                    UI.hideGalleries();
                 });
             });
+            
         },
 
-        next_section: function () {
-            var section, prev, first;
-            for (section in UI.gallery) {
-                if (UI.gallery.hasOwnProperty(section)) {
-                    if (!first) {
-                        first = section;
-                    }
-                    if (prev == UI.section) {
-                        return section;
-                    }
-                    prev = section;
-                }
-            }
-            return first;
+        nextSection: function (section) {
+            var sectionIndex = UI.sections.indexOf(section || UI.section);
+            return (
+                sectionIndex == UI.sections.length - 1
+                ? UI.sections[0]
+                : UI.sections[sectionIndex + 1]
+            );
         },
 
-        prev_section: function () {
-            var section, prev, last;
-            for (section in UI.gallery) {
-                if (UI.gallery.hasOwnProperty(section)) {
-                    if (section == UI.section && prev) {
-                        return prev;
-                    }
-                    prev = section;
-                    last = section;
-                }
-            }
-            return last;
+        prevSection: function (section) {
+            var sectionIndex = UI.sections.indexOf(section || UI.section);
+            return (
+                sectionIndex > 0
+                ? UI.sections[sectionIndex - 1]
+                : UI.sections[UI.sections.length - 1]
+            );
         },
 
         // load images into the main content and thumbnail gallery
-        load_imgs: function (index) {
+        loadImgs: function (index) {
             var i, prev, next,
-                to_preload = [],
+                toPreload = [],
                 html = [],
                 section = UI.section,
-                gallery = UI.gallery[section],
-                gallery_items;
+                gallery = UI.galleries[section],
+                galleryItems,
+                origUrl;
 
-            UI.hide_thumbnails();
+            UI.hidePopups();
             // ensure the requested index is within the gallery
             if (index === undefined) {
                 index = UI.index || 0;
             } else if (index < 0) {
-                UI.nav_to(UI.prev_section());
+                UI.navTo(UI.prevSection());
                 section = UI.section;
-                gallery = UI.gallery[UI.section];
+                gallery = UI.galleries[UI.section];
                 index = gallery.length - 1;
             } else if (index >= gallery.length) {
-                UI.nav_to(UI.next_section());
+                UI.navTo(UI.nextSection());
                 section = UI.section;
-                gallery = UI.gallery[UI.section];
+                gallery = UI.galleries[UI.section];
                 index = 0;
             }
             UI.index = index;
-            UI.index_thumbnails = index;
-            // anytime we change images, reset the autoplay timer
-            UI.autoplay_last_tick = (new Date).getTime();
+            // when loadin images we need to reset our spot in the thumbnails
+            UI.indexThumbnails = index;
+            UI.sectionThumbnails = section;
+            // anytime we change images, reset the autoplay timer; otherwise if
+            // you click just before an automated image change you immediately
+            // get shifted again
+            UI.autoplayLastTick = (new Date).getTime();
             // load a few at a time so we have at least a few preloading
-            UI.$els.gallery.innerHTML = UI.render_images(
-                UI.get_gallery_items(section, index, 2),
+            UI.$els.gallery.innerHTML = UI.renderImages(
+                UI.getGalleryItems(section, index, 1),
                 GalleryItem.IMAGE_LARGE
             );
             // generate quick preview thumbnails in the footer
-            UI.load_footer_imgs(index);
+            UI.loadFooterImgs(index);
             // and also a bunch in the thumbnail browser
-            UI.load_thumbnail_imgs(index);
+            UI.loadThumbnailImgs(section, index);
             // set sizing/click behaviors
             UI.$els.gallery.querySelectorAll('img[data-item-pos]').forEach(function (img) {
-                UI._format_img(img);
+                UI.formatImg(img);
             });
-            UI.init_img_behaviors();
-            UI.update_header(gallery[index].name);
+            UI.initImgBehaviors();
+            // make sure our UI elements specific to the focused image are updated
+            UI.updateHeader(section, index, gallery[index].name);
+            UI.$1('.info-download', UI.$els.info)
+                .setAttribute('href', gallery[index].original);
         },
 
-        next_img: function () {
-            UI.load_imgs(UI.index + 1);
+        nextImg: function () {
+            var go = function() {
+                UI.loadImgs(UI.index + 1);
+            };
+            UI.$1('img[data-item-pos="current"]', UI.$els.gallery)
+                .classList.add('swiped-right');
+            setTimeout(go, 600);
         },
 
-        prev_img: function () {
-            UI.load_imgs(UI.index - 1);
+        prevImg: function () {
+            var go = function() {
+                UI.loadImgs(UI.index - 1);
+            };
+            UI.$1('img[data-item-pos="current"]', UI.$els.gallery)
+                .classList.add('swiped-left');
+            setTimeout(go, 600);
         },
 
-        _format_imgs: function () {
+        formatImgs: function () {
             var imgs = UI.$('img', UI.$els.gallery), i;
             for (i = 0; i < imgs.length; i++) {
-                UI._format_img(imgs[i]);
+                UI.formatImg(imgs[i]);
             }
         },
 
-        _format_img: function (img) {
-            var margin, p_el_style, bounds, extra_x, extra_y, bound_x, bound_y,
-                ratio, img_x, img_y, new_style, dim,
-                key, new_x, new_y;
+        formatImg: function (img) {
+            var margin, parentElStyle, bounds, extraX, extraY, boundX, boundY,
+                ratio, imgX, imgY, newStyle, dim,
+                key, newX, newY;
             if (!img.complete) {
                 img.addEventListener('load',  function () {
-                    UI._format_img(img);
+                    UI.formatImg(img);
                 });
                 return
             }
@@ -580,35 +746,35 @@
             if (!img.parentElement) {
                 // wait until we're ready though!
                 setTimeout(function () {
-                    UI._format_img(img);
+                    UI.formatImg(img);
                 }, 100);
                 return;
             }
             bounds = img.parentElement.getBoundingClientRect()
-            p_el_style = window.getComputedStyle(img.parentElement);
-            bound_y = bounds.height - (
-                (parseInt(p_el_style.paddingTop, 10) || 0)
-                + (parseInt(p_el_style.paddingBottom, 10) || 0)
-                + (parseInt(p_el_style.marginTop, 10) || 0)
-                + (parseInt(p_el_style.marginBottom, 10) || 0)
+            parentElStyle = window.getComputedStyle(img.parentElement);
+            boundY = bounds.height - (
+                (parseInt(parentElStyle.paddingTop, 10) || 0)
+                + (parseInt(parentElStyle.paddingBottom, 10) || 0)
+                + (parseInt(parentElStyle.marginTop, 10) || 0)
+                + (parseInt(parentElStyle.marginBottom, 10) || 0)
             );
-            bound_x = bounds.width - (
-                (parseInt(p_el_style.paddingLeft, 10) || 0)
-                + (parseInt(p_el_style.paddingRight, 10) || 0)
-                + (parseInt(p_el_style.margingLeft, 10) || 0)
-                + (parseInt(p_el_style.margingRight, 10) || 0)
+            boundX = bounds.width - (
+                (parseInt(parentElStyle.paddingLeft, 10) || 0)
+                + (parseInt(parentElStyle.paddingRight, 10) || 0)
+                + (parseInt(parentElStyle.margingLeft, 10) || 0)
+                + (parseInt(parentElStyle.margingRight, 10) || 0)
             );
             // figoure out our dimensions
             // always calc based on our original attributes; set 'em on first load
-            img_x = parseInt(img.getAttribute('data-x'), 10);
-            img_y = parseInt(img.getAttribute('data-y'), 10);
-            if (!img_x) {
-                img_x = img.width;
-                img.setAttribute('data-x', img_x);
+            imgX = parseInt(img.getAttribute('data-x'), 10);
+            imgY = parseInt(img.getAttribute('data-y'), 10);
+            if (!imgX) {
+                imgX = img.width;
+                img.setAttribute('data-x', imgX);
             }
-            if (!img_y) {
-                img_y = img.height;
-                img.setAttribute('data-y', img_y);
+            if (!imgY) {
+                imgY = img.height;
+                img.setAttribute('data-y', imgY);
             }
             // if we're rotated on our side, we have to swap X/Y vals
             dim = {
@@ -620,157 +786,165 @@
                 mY2: 'marginRight',
             }
             // whichever side protrudes more, percentage wise, if any, sets our ratio
-            extra_y = (img_y - bound_y) / img_y;
-            extra_x = (img_x - bound_x) / img_x;
-            new_style = {};
-            ratio = img_x / img_y;  // e.g. 1.5 = wide, .666 = tall
-            if (extra_x || extra_y) {
-                if (extra_y > extra_x) {
+            extraY = (imgY - boundY) / imgY;
+            extraX = (imgX - boundX) / imgX;
+            newStyle = {};
+            ratio = imgX / imgY;  // e.g. 1.5 = wide, .666 = tall
+            if (extraX || extraY) {
+                if (extraY > extraX) {
                     // we're taller rather than wider
-                    new_style[dim.Y] = bound_y + 'px';
-                    new_style[dim.X] = (img_x * (bound_y / img_y)) + 'px';
+                    newStyle[dim.Y] = boundY + 'px';
+                    newStyle[dim.X] = (imgX * (boundY / imgY)) + 'px';
                 } else {
                     // wider than we are tall
-                    new_style[dim.X] = bound_x + 'px';
-                    new_style[dim.Y] = (img_y * (bound_x / img_x)) + 'px';
+                    newStyle[dim.X] = boundX + 'px';
+                    newStyle[dim.Y] = (imgY * (boundX / imgX)) + 'px';
                 }
             } else {
                 // not bound by either side, so just center it full-size
-                new_style[dim.X] = (img_x) + 'px';
-                new_style[dim.Y] = (img_y) + 'px';
+                newStyle[dim.X] = (imgX) + 'px';
+                newStyle[dim.Y] = (imgY) + 'px';
             }
-            new_x = parseInt(new_style[dim.X], 10);
-            new_y = parseInt(new_style[dim.Y], 10);
+            newX = parseInt(newStyle[dim.X], 10);
+            newY = parseInt(newStyle[dim.Y], 10);
             // black magic warning
-            new_style[dim.mX] = (Math.max(0, bound_y - new_y) / 2) + 'px';
-            new_style[dim.mY] = (Math.max(0, bound_x - new_x) / 2) + 'px';
-            new_style[dim.mX2] = 'auto';
-            new_style[dim.mY2] = 'auto';
+            newStyle[dim.mX] = (Math.max(0, boundY - newY) / 2) + 'px';
+            newStyle[dim.mY] = (Math.max(0, boundX - newX) / 2) + 'px';
+            newStyle[dim.mX2] = 'auto';
+            newStyle[dim.mY2] = 'auto';
             // apply styling and flag as loaded for final CSS
-            for (key in new_style) {
-                img.style[key] = new_style[key];
+            for (key in newStyle) {
+                img.style[key] = newStyle[key];
             }
             img.classList.add('loaded');
         },
 
-        _format_loc: function (index, section, img_name) {
+        formatSection: function (section, index, imgName) {
             var html;
-            if (section) {
-                html = '<strong>' + index + '. ' + section + '</strong>';
-            } else {
-                html = '<strong>' + index + '.</strong>';
+            // if there is only one section who cares
+            if (!section) {
+                return '';
             }
-            if (img_name) {
-                img_name = img_name.split('/');
-                img_name = img_name[img_name.length - 1];
-                html += ' - ' + img_name;
+            html = '<strong>' + section + '</strong>';
+            if (imgName) {
+                imgName = imgName.split('/');
+                imgName = imgName[imgName.length - 1];
+                html += '<span class="gallery-image-name"> - ' + imgName + '</span>';
             }
-            html += ' (' + (UI.index + 1) + ' of ' + UI.gallery[section].length + ')';
+            html += ' (' + (index + 1) + ' of ' + UI.galleries[section].length + ')';
             return html;
         },
 
-        update_header: function (img_name) {
-            var i = 0, loc_index, loc, prev_loc, next_loc;
-            for (loc in UI.gallery) {
-                if (UI.gallery.hasOwnProperty(loc)) {
-                    i += 1;
-                    if (loc === UI.section) {
-                        loc_index = i;
-                        UI.$els.section.innerHTML = UI._format_loc(i, loc);
-                    } else if (i !== 0 && loc_index === undefined) {
-                        prev_loc = loc;
-                    } else if (loc_index !== undefined) {
-                        next_loc = loc;
-                        break;
-                    }
-                }
-            }
+        updateHeader: function (section, index, imgName) {
+            UI.$els.section.innerHTML = UI.formatSection(section, index, imgName);
             window.location.hash = '#' + [
-                'i=' + (UI.index + 1),
+                'i=' + (index + 1),
                 's=' + encodeURI(UI.section)
             ].join('&');
         },
 
-        init: function () {
-            // fetch images.json and generate gallery information
-            var loc;
-            var xhr = new XMLHttpRequest();
-            UI.init_els();
-            UI.init_behaviors();
-            xhr.open('GET', './images.json', true);
-            xhr.onload = function () {
-                var images, i, item, loc, nav_path;
-                if (this.status >= 200 && this.status < 300) {
-                    images = JSON.parse(this.response).images;
-                    for (i = 0; i < images.length; i++) {
-                        nav_path = images[i].name.split('/');
-                        loc = nav_path.slice(0, -1).join('/')
-                        if (!UI.gallery.hasOwnProperty(loc)) {
-                            UI.gallery[loc] = [];
-                        }
-                        UI.gallery[loc].push(images[i]);
-                    }
-                    UI.on_init();
-                } else {
-                    UI.error();
-                }
-            }
-            xhr.onerror = function () {
-                UI.error();
-            }
-            xhr.send();
-        },
-
         // cache UI parts
-        init_els: function () {
+        initEls: function () {
             UI.$cache('#content', 'content', {single: true});
             UI.$cache('#content .images', 'gallery', {single: true});
-            UI.$cache('#content .nav-next', 'nav_next', {single: true});
-            UI.$cache('#content .nav-prev', 'nav_prev', {single: true});
-            UI.$cache('#sections', 'sections', {single: true});
-            UI.$cache('#sections .browser', 'sections_browser', {single: true});
-            UI.$cache('#sections .controls', 'sections_controls', {single: true});
+            UI.$cache('#content .nav-next', 'navNext', {single: true});
+            UI.$cache('#content .nav-prev', 'navPrev', {single: true});
+            UI.$cache('#content .nav-info', 'navInfo', {single: true});
+            UI.$cache('#galleries', 'galleries', {single: true});
+            UI.$cache('#galleries .browser', 'galleriesBrowser', {single: true});
+            UI.$cache('#galleries .controls', 'galleriesControls', {single: true});
             UI.$cache('#thumbnails', 'thumbnails', {single: true});
-            UI.$cache('#thumbnails .browser', 'thumbnails_browser', {single: true});
-            UI.$cache('#thumbnails .controls', 'thumbnails_controls', {single: true});
+            UI.$cache('#thumbnails .browser', 'thumbnailsBrowser', {single: true});
+            UI.$cache('#thumbnails .controls', 'thumbnailsControls', {single: true});
+            UI.$cache('#info', 'info', {single: true});
+            UI.$cache('#music', 'music', {single: true});
             UI.$cache('#footer', 'footer', {single: true});
-            UI.$cache('#footer .images', 'footer_nav', {single: true});
-            UI.$cache('#content .nav-next', 'next_image', {single: true});
-            UI.$cache('#content .nav-prev', 'prev_image', {single: true});
+            UI.$cache('#footer .images', 'footerNav', {single: true});
+            UI.$cache('#content .nav-next', 'nextImage', {single: true});
+            UI.$cache('#content .nav-prev', 'prevImage', {single: true});
             UI.$cache('#header .section', 'section', {single: true});
-            UI.$cache('#header .auto-play .start', 'autoplay_start', {single: true});
-            UI.$cache('#header .auto-play .stop', 'autoplay_stop', {single: true});
-            UI.$cache('#header .auto-play .auto-play-ctr', 'autoplay_ctr', {single: true});
+            UI.$cache('#header .auto-play .start', 'autoplayStart', {single: true});
+            UI.$cache('#header .auto-play .stop', 'autoplayStop', {single: true});
+            UI.$cache('#header .auto-play .auto-play-ctr', 'autoplayCtr', {single: true});
         },
 
         // setup some general bindings
-        init_behaviors: function () {
-            UI.$els.section.addEventListener('click', UI.show_sections);
-            UI.$els.autoplay_start.addEventListener('click', UI.autoplay_start);
-            UI.$els.autoplay_stop.addEventListener('click', UI.autoplay_stop);
-            UI.$els.nav_next.addEventListener('click', UI.next_img);
-            UI.$els.nav_prev.addEventListener('click', UI.prev_img);
-            UI.$els.content.addEventListener('click', UI.hide_thumbnails);
-            UI.$1('.close', UI.$els.sections_controls)
-                .addEventListener('click', UI.hide_sections);
-            UI.$1('.close', UI.$els.thumbnails_controls)
-                .addEventListener('click', UI.hide_thumbnails);
-            UI.$1('.page-prev', UI.$els.thumbnails_controls)
-                .addEventListener('click', function () {
-                    UI.load_thumbnail_imgs(UI.index_thumbnails - (UI.num_thumbnails * 2) - 1);
-                });
-            UI.$1('.page-next', UI.$els.thumbnails_controls)
-                .addEventListener('click', function () {
-                    UI.load_thumbnail_imgs(UI.index_thumbnails + (UI.num_thumbnails * 2) + 1);
-                });
-            UI.$1('.nav-thmb', UI.$els.content).addEventListener('click', function (el) {
-                UI.show_thumbnails();
-                el.stopPropagation();
+        initBehaviors: function () {
+            UI.$els.section.addEventListener('click', UI.showGalleries);
+            UI.$els.autoplayStart.addEventListener('click', UI.autoplayStart);
+            UI.$els.autoplayStop.addEventListener('click', UI.autoplayStop);
+            UI.$els.navNext.addEventListener('click', UI.nextImg);
+            UI.$els.navPrev.addEventListener('click', UI.prevImg);
+            UI.$els.navInfo.addEventListener('click', function (ev) {
+                UI.$els.info.classList.remove('hidden');
+                // if we don't stop the event the canvas click will just hide us :D
+                ev.preventDefault();
+                ev.stopPropagation();
             });
-            UI.$els.content.addEventListener('touchstart', UI._touch_start, {passive: true});
-            UI.$els.content.addEventListener('touchmove', UI._touch_move, {passive: true});
-            window.addEventListener('hashchange', UI.on_hashchange);
-            window.addEventListener('resize', UI._format_imgs);
+            UI.$els.content.addEventListener('click', UI.hidePopups);
+            UI.$1('.close', UI.$els.galleriesControls)
+                .addEventListener('click', UI.hideGalleries);
+            UI.$1('.close', UI.$els.thumbnailsControls)
+                .addEventListener('click', UI.hidePopups);
+            UI.$1('.page-prev', UI.$els.thumbnailsControls)
+                .addEventListener('click', function () {
+                    // figure out what our new center will become
+                    var index = UI.indexThumbnails - (UI.numThumbnails * 2) - 1,
+                        section,
+                        galleryItem;
+                    if (index < 0) {
+                        galleryItem = UI.scrollGallery(
+                            UI.sectionThumbnails,
+                            UI.prevSection(UI.sectionThumbnails),
+                            index,
+                            true
+                        );
+                        section = galleryItem.section;
+                        index = galleryItem.index;
+                    } else {
+                        section = UI.sectionThumbnails
+                    }
+                    UI.loadThumbnailImgs(section, index);
+                });
+            UI.$1('.page-next', UI.$els.thumbnailsControls)
+                .addEventListener('click', function () {
+                    // figure out what our new center will become
+                    var index = UI.indexThumbnails + (UI.numThumbnails * 2) + 1,
+                        galleryLen = UI.galleries[UI.sectionThumbnails].length,
+                        section,
+                        galleryItem;
+                    if (index >= galleryLen) {
+                        var galleryItem = UI.scrollGallery(
+                            UI.sectionThumbnails,
+                            UI.nextSection(UI.sectionThumbnails),
+                            index - galleryLen,
+                            false
+                        );
+                        section = galleryItem.section;
+                        index = galleryItem.index;
+                    } else {
+                        section = UI.sectionThumbnails;
+                    }
+                    UI.loadThumbnailImgs(section, index);
+                });
+            UI.$1('.nav-thmb', UI.$els.footer).addEventListener('click', function (ev) {
+                UI.showThumbnails();
+                ev.stopPropagation();
+            });
+            UI.$1('.info-ctrl', UI.$els.info).addEventListener('click', function() {
+                // no matter what, all controls should hide the popup
+                UI.$els.info.classList.add('hidden');
+                ev.stopPropagation();
+            });
+
+            window.addEventListener('touchstart', UI.touchStart, {passive: true});
+            window.addEventListener('touchmove', UI.touchMove, {passive: true});
+            window.addEventListener('touchstop', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+            }, {passive: true});
+            window.addEventListener('hashchange', UI.onHashchange);
+            window.addEventListener('resize', UI.formatImgs);
             document.body.addEventListener('keyup', function (ev) {
                 // back/forward on left-right keyboard buttons
                 // up/down to show/hide thumbnails and section browser
@@ -781,30 +955,94 @@
                     down: 40
                 };
                 if (ev.keyCode === keyCode.left) {
-                    UI.prev_img();
+                    UI.prevImg();
                 } else if (ev.keyCode === keyCode.up) {
-                    if (UI.$els.sections.classList.contains('hidden')) {
-                        UI.show_thumbnails();
-                    } else {
-                        UI.hide_sections();
-                    }
+                    UI.slideUp();
                 } else if (ev.keyCode === keyCode.right) {
-                    UI.next_img();
+                    UI.nextImg();
                 } else if (ev.keyCode === keyCode.down) {
-                    if (UI.$els.thumbnails.classList.contains('hidden')) {
-                        UI.show_sections();
-                    } else {
-                        UI.hide_thumbnails();
-                    }
+                    UI.slideDown();
                 }
             });
         },
 
-        on_init: function () {
+        initComponents: function () {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'music.json', true);
+            xhr.onload = function () {
+                var playlist;
+                // 404 = no music, no biggy
+                if (this.status >= 200 && this.status < 300) {
+                    playlist = [];
+                    JSON.parse(this.response).music.forEach(function (song) {
+                        var srcParts = song.src.split('/'),
+                            titleParts = srcParts[srcParts.length - 1].split('.'),
+                            title = titleParts.slice(0, titleParts.length - 1).join('.');
+                        playlist.push({
+                            src: song.src,
+                            title: title,
+                            tags: song.tags,
+                        });
+                    });
+                    UI.music = Music(playlist, {
+                        playEl: UI.$1('.song-play', UI.$els.music),
+                        nextEl: UI.$1('.song-next', UI.$els.music),
+                        prevEl: UI.$1('.song-prev', UI.$els.music),
+                        titleEl: UI.$1('.song-title', UI.$els.music),
+                        progressEl: UI.$1('.song-progress', UI.$els.music)
+                    });
+                } else {
+                    UI.$els.music.style.display = 'none';
+                }
+            };
+            xhr.onerror = function () {
+                UI.$els.music.style.display = 'none';
+            };
+            xhr.send();
+        },
+
+        onInit: function () {
             // and get it rollin'!
-            UI.on_hashchange();
+            UI.onHashchange();
             // load this last so we know which section is selected
-            UI.load_sections();
+            UI.renderGalleryList();
+        },
+
+        init: function () {
+            // fetch images.json and generate gallery information
+            var section;
+            var xhr = new XMLHttpRequest();
+            UI.initEls();
+            UI.initComponents();
+            UI.initBehaviors();
+            xhr.open('GET', 'images.json', true);
+            xhr.onload = function () {
+                var images, i, item, navPath;
+                if (this.status >= 200 && this.status < 300) {
+                    UI.galleries = {};
+                    UI.sections = [];
+                    images = JSON.parse(this.response).images;
+                    for (i = 0; i < images.length; i++) {
+                        navPath = images[i].name.split('/');
+                        section = navPath.slice(0, -1).join('/');
+                        if (!UI.galleries.hasOwnProperty(section)) {
+                            UI.galleries[section] = [];
+                        }
+                        UI.galleries[section].push(images[i]);
+                        if (UI.sections.indexOf(section) == -1) {
+                            UI.sections.push(section);
+                        }
+                    }
+                    UI.sections.sort();
+                    UI.onInit();
+                } else {
+                    UI.error();
+                }
+            }
+            xhr.onerror = function () {
+                UI.error();
+            }
+            xhr.send();
         }
     };
 

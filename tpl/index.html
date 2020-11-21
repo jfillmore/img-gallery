@@ -2,16 +2,16 @@
     <head>
         <meta charset="utf-8">
         <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <title>Kate and Jonny's Wedding</title>
+        <title>##TITLE##</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <link href="css/gallery.css" rel="stylesheet">
         <link href="css/theme.css" rel="stylesheet">
     </head>
     <body>
 
-        <div id="sections" class="hidden">
+        <div id="galleries" class="hidden">
             <div class="controls">
-                <div class="close">CLOSE</div>
+                <div class="close">&#9746; CLOSE</div>
             </div>
             <div class="browser">
             </div>
@@ -21,24 +21,43 @@
             <div id="header">
                 <span class="section"></span>
                 <div class="auto-play">
-                    <a class="start"><span class="sym-start"></span>auto-play</a>
-                    <a class="stop"><span class="sym-stop"></span>auto-play <span class="auto-play-ctr"></span></a>
+                    <a class="start">&#9656; auto-play</a>
+                    <a class="stop">&#9632; auto-play <span class="auto-play-ctr"></span></a>
                 </div>
             </div>
 
             <div class="flex-content-wrapper">
                 <div id="content" class="flex-content">
                     <div class="images"><!-- GALLERY IS INSERTED HERE --></div>
-                    <div class="nav-prev nav-control">&lt;</div>
-                    <div class="nav-next nav-control">&gt;</div>
-                    <div class="nav-thmb nav-control">&Lambda;</div>
-                    <div class="nav-info nav-control">&Xi;</div>
+                    <div class="nav-prev nav-ctrl">&lt;</div>
+                    <div class="nav-next nav-ctrl">&gt;</div>
+                    <div class="nav-info nav-ctrl">&Xi;</div>
+                    <div id="info" class="hidden">
+                        <div class="controls">
+                            <a href="#set-dynamically" class="info-ctrl info-download" rel="noopener" target="_blank"><span class="symbol">&#11029;</span> View Original</a>
+                            <!--
+                            TODO:
+                            - md5sum original to avoid usings for tracking
+                            - have way to view favorites only
+                            - have way to share favorites
+                            <div class="info-ctrl info-favorite"><span class="symbol">&#11090;</span> Favorite</div>
+                            -->
+                            <div class="info-ctrl info-close"><span class="symbol">&#9746;</span> Close</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div id="footer" class="flex-footer">
+            <div id="music" class="flex-row">
+                <span class="song-prev song-ctrl"></span>
+                <span class="song-play song-ctrl"></span>
+                <span class="song-next song-ctrl"></span>
+                <span class="song-title"></span>
+                <span class="song-progress"></span>
+            </div>
+            <div id="footer" class="flex-row">
                 <div class="controls">
-                    <div class="thumbnails"></div>
+                    <div class="nav-thmb nav-ctrl">&Lambda;</div>
                 </div>
                 <div class="images"><!-- THUMBNAIL BROWSER --></div>
             </div>
@@ -48,7 +67,7 @@
             <div class="browser"></div>
             <div class="controls">
                 <div class="page-prev">&lt; PREV</div>
-                <div class="close">CLOSE</div>
+                <div class="close"><span class="symbol">&#9746;</span> CLOSE</div>
                 <div class="page-next">NEXT &gt;</div>
             </div>
         </div>

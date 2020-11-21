@@ -169,6 +169,8 @@ declare -a convert_args
 
     rem "Generating images; this may take a while..."
     cd "$SRC_DIR" || fail "failed to CD to src dir"
+    # ensure our image directory has a symlink back to the originals
+    cmd ln -sf "$PWD" "$SITE_ROOT/images/originals"
     {
         echo "{\"images\": ["
         find . -iname \*.jpg -o -iname \*.jpeg \
@@ -176,22 +178,13 @@ declare -a convert_args
             | while read img; do
             dir_name=$(dirname "$img")
             file_name=$(basename "${img%.*}")
+
             # skip to only certain images
             [ -n "$MATCH_FILE" -a "${file_name//$MATCH_FILE/}" = "$file_name" ] && continue
 
-            # get the orientation to auto-correct
-            #orientation=$(identify -format '%[EXIF:*]' "$img" \
-            #    | awk -F= '$1 == "exif:Orientation" {print $2}')
-            #if [ "$orientation" = "1" -o "$orientation" = '' ]; then
-            #    echo "Copying over '$img' verbatum"
-            #    cp -f "$img" "../$SITE_ROOT/images/$img" &>/dev/null
-            #else
-            #    rem "'$img' needs auto-orientation"
-            #    convert "$img" -auto-orient "../$SITE_ROOT/images/$img"
-            #fi
-            
+            orig_url="images/originals/$dir_name/$(basename "$img")"
+            echo "  {\"name\": \"$dir_name/$file_name\", \"original\": \"$orig_url\", \"files\": ["
             # for each breakpoint, generate images
-            echo "  {\"name\": \"$dir_name/$file_name\", \"files\": ["
             for ((i=0; i<${#BP_SIZES[*]}; i++)); do
                 mkdir -p "$SITE_ROOT/images/dist/$dir_name" \
                     || fail "Failed to create '$SITE_ROOT/images/dist/$dir_name'"
